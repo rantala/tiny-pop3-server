@@ -15,8 +15,8 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -26,13 +26,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-DEFAULT_USERNAME = 'user'
-DEFAULT_PASSWORD = 'pass'
-
-import Tkinter as T
-import tkFileDialog
+import tkinter as T
+from tkinter import filedialog
 import hashlib
-import StringIO
+from io import StringIO
 
 import twisted.mail.pop3
 from twisted.internet import tksupport, reactor
@@ -40,13 +37,17 @@ from twisted.cred.portal import Portal, IRealm
 from twisted.internet.protocol import ServerFactory
 from twisted.mail.pop3 import IMailbox
 from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse
-from zope.interface import implements
+from zope.interface import implementer
+
+DEFAULT_USERNAME = 'user'
+DEFAULT_PASSWORD = 'pass'
 
 EVENT_MAILBOXCHANGE = '<<mailboxchange>>'
 EVENT_MESSAGELOGCHANGE = '<<messagelogchange>>'
 
 root = None
 messagelog = []
+
 
 class Service:
 	def __init__(self):
@@ -56,17 +57,21 @@ class Service:
 		self.username = DEFAULT_USERNAME
 		self.password = DEFAULT_PASSWORD
 
+
 def emit_event(event):
-	#print "Emitting event {}".format(event)
+	# print(f"Emitting event {event}")
 	root.event_generate(event, when='tail')
 
+
 def incoming_line(line):
-	messagelog.append("C: " + line.strip("\n\r"))
+	messagelog.append("C: " + line.decode().strip("\n\r"))
 	emit_event(EVENT_MESSAGELOGCHANGE)
 
+
 def outgoing_line(line):
-	messagelog.append("S: " + line.strip("\n\r"))
+	messagelog.append("S: " + line.decode().strip("\n\r"))
 	emit_event(EVENT_MESSAGELOGCHANGE)
+
 
 # Use a class for each message we store in the mailbox.
 class Message:
@@ -95,9 +100,9 @@ class Message:
 	def undelete(self):
 		self.__deleted = False
 
-class Mailbox:
-	implements(IMailbox)
 
+@implementer(IMailbox)
+class Mailbox:
 	def __init__(self):
 		self.messages = []
 
@@ -124,7 +129,7 @@ class Mailbox:
 		self.messages[index].delete()
 		emit_event(EVENT_MAILBOXCHANGE)
 
-	def undeleteMessages(self):
+	def undeleteMessages(self, index):
 		if index >= len(self.messages):
 			raise ValueError
 		self.messages[index].undelete()
@@ -142,9 +147,9 @@ class Mailbox:
 		self.messages.append(msg)
 		emit_event(EVENT_MAILBOXCHANGE)
 
-class SimpleRealm:
-	implements(IRealm)
 
+@implementer(IRealm)
+class SimpleRealm:
 	def __init__(self, mailbox):
 		self.mailbox = mailbox
 
@@ -153,13 +158,14 @@ class SimpleRealm:
 			raise NotImplementedError()
 		return IMailbox, mailbox, lambda: None
 
+
 # I want to log all traffic between the client and the server. Use our own
 # server class to get the most interesting events from the twisted framework.
 class POP3Server(twisted.mail.pop3.POP3):
 
 	# Could show something in the UI to indicate a connected client:
-	#def connectionMade(self):
-	#twisted.mail.pop3.POP3.connectionMade(self)
+	# def connectionMade(self):
+	# twisted.mail.pop3.POP3.connectionMade(self)
 
 	def successResponse(self, message=''):
 		outgoing_line(twisted.mail.pop3.successResponse(message))
@@ -172,6 +178,7 @@ class POP3Server(twisted.mail.pop3.POP3):
 	def sendLine(self, line):
 		outgoing_line(line)
 		twisted.mail.pop3.POP3.sendLine(self, line)
+
 
 class GUI:
 	class HScrollList(T.Frame):
@@ -216,14 +223,10 @@ class GUI:
 		self.message_list.list.bind('<Button-1>', self.display_message)
 		master.bind(EVENT_MAILBOXCHANGE, self.refresh_message_list)
 
-		self.add_message_button = T.Button(message_list_frame,
-				text='Add Test Message',
-				command=self.add_message)
+		self.add_message_button = T.Button(message_list_frame, text='Add Test Message', command=self.add_message)
 		self.add_message_button.pack(side=T.TOP, fill=T.X)
 
-		self.import_message_button = T.Button(message_list_frame,
-				text='Import Message from File',
-				command=self.import_message)
+		self.import_message_button = T.Button(message_list_frame, text='Import Message from File', command=self.import_message)
 		self.import_message_button.pack(side=T.TOP, fill=T.X)
 
 		message_content_frame = T.Frame(message_frame)
@@ -241,35 +244,33 @@ class GUI:
 
 	def add_message(self):
 		self.message_generate_count += 1
-		m = Message("Hi there!\nGenerated message number {} goes here.\n"
-				.format(self.message_generate_count))
+		m = Message(f"Hi there!\nGenerated message number {self.message_generate_count} goes here.\n")
 		self.mailbox.addMessage(m)
 
 	def import_message(self):
-		filenames = tkFileDialog.askopenfilenames()
+		filenames = filedialog.askopenfilenames()
 		if not filenames:
 			return
 
 		# http://bugs.python.org/issue5712
 		filenames = self.master.tk.splitlist(filenames)
-		print "Importing files: {}".format(filenames)
+		print(f"Importing files: {filenames}")
 
 		for filename in filenames:
-			print "Opening file '{}'".format(filename)
+			print(f"Opening file '{filename}'")
 			f = open(filename)
 			content = f.read()
 			f.close()
-			#print "MESSAGE: {}".format(content)
+			# print(f"MESSAGE: {content}")
 			self.mailbox.addMessage(Message(content, f.name))
 
 	def refresh_message_list(self, event=None):
 		self.message_list.list.delete(0, T.END)
-		for idx in range(1, len(self.mailbox.messages)+1):
-			if self.mailbox.messages[idx-1].label():
-				label = "Message {}: {}".format(idx,
-					self.mailbox.messages[idx-1].label())
+		for idx in range(1, len(self.mailbox.messages) + 1):
+			if self.mailbox.messages[idx - 1].label():
+				label = f"Message {idx}: {self.mailbox.messages[idx - 1].label()}"
 			else:
-				label = "Message {}".format(idx)
+				label = f"Message {idx}"
 			self.message_list.list.insert(T.END, label)
 
 	def refresh_message_log_content(self, event=None):
@@ -283,8 +284,8 @@ class GUI:
 			return
 		message_num = self.message_list.list.nearest(event.y)
 		self.messagecontent.text.delete('0.0', T.END)
-		self.messagecontent.text.insert('0.0',
-			self.mailbox.messages[message_num].content())
+		self.messagecontent.text.insert('0.0', self.mailbox.messages[message_num].content())
+
 
 if __name__ == '__main__':
 	service = Service()
@@ -298,14 +299,14 @@ if __name__ == '__main__':
 	f.protocol = POP3Server
 	f.protocol.portal = portal
 
-	print "Starting to listen on {}:{}...".format(service.interface, service.port)
+	print(f"Starting to listen on {service.interface}:{service.port}...")
 	service.listeningPort = reactor.listenTCP(port=service.port, factory=f, interface=service.interface)
-	#root.addCleanup(service.listeningPort.stopListening)
+	# root.addCleanup(service.listeningPort.stopListening)
 
 	root = T.Tk()
 	tksupport.install(root)
 	root.protocol('WM_DELETE_WINDOW', reactor.stop)
 	gui = GUI(root, mailbox, service)
 
-	print "Entering event loop!"
+	print("Entering event loop!")
 	reactor.run()
